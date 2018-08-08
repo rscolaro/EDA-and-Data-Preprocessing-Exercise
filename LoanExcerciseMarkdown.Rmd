@@ -1,0 +1,188 @@
+---
+title: "EDA and Preprocessing for the Loan Dataset"
+author: "Aaradhya Mehta, Lavanya Kanagaraj, Ryan Scolaro, and Vamsi Veginati"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r imports, include=FALSE}
+#Installations are commented out as the packages are already installed.
+#install.packages('plyr')
+library(plyr)
+#install.packages("ggplot2")
+library(ggplot2)
+#install.packages("e1071")
+library(e1071)
+#install.packages("mice")
+library(mice)
+```
+
+## Import the data and view a summary and missing values.
+
+```{r loan}
+loan.data <- read.csv(file="application_train.csv", header=TRUE, sep=",", na.strings = c("", "NA"))
+attach(loan.data)
+summary(loan.data)
+sapply(loan.data, function(x) sum(is.na(x)))
+```
+
+## The missing occupation variables and employee phone variables do not seem to be related.
+
+```{r occupation}
+count(loan.data, vars = c("OCCUPATION_TYPE","FLAG_EMP_PHONE"))
+```
+
+## Create a box plot of income and credit. The first has graph has no parameters besides the data, while the second groups the data by family status. Grouping can help graph continuous variables, but the presense of very large outliers still makes the plot hard to read.
+
+```{r plots}
+boxplot(loan.data$AMT_INCOME_TOTAL,loan.data$AMT_CREDIT)
+
+(fs <- ggplot(loan.data, aes(x="", y=AMT_CREDIT, group=NAME_FAMILY_STATUS)) + 
+  geom_boxplot(fill="slateblue", alpha=0.2,outlier.color="blue") + 
+  xlab("FAMILY STATUS")+ylab("AMT CREDIT"))
+```
+
+#### These plots show the presense of some large outliers, though we will not remove them for now.
+
+***
+
+## Create flag variables for the family status variable.
+
+```{r flag}
+loan.data$flag_s_not_m <- 0
+loan.data$flag_m <- 0
+loan.data$flag_c_m <- 0
+loan.data$flag_w <- 0
+loan.data$flag_s <- 0
+#unknown will be if all flags are 0
+#first single not married - change new field to 1 depending on
+#flag family status, this can be used for logistic regression
+loan.data$flag_s_not_m[loan.data$NAME_FAMILY_STATUS == 'Single / not married'] <- 1
+#continue for all other fields
+loan.data$flag_m[loan.data$NAME_FAMILY_STATUS == 'Married'] <- 1
+loan.data$flag_c_m[loan.data$NAME_FAMILY_STATUS == 'Civil Marriage'] <- 1
+loan.data$flag_w[loan.data$NAME_FAMILY_STATUS == 'Widow'] <- 1
+loan.data$flag_s[loan.data$NAME_FAMILY_STATUS == 'Separated'] <- 1
+#oounts (dplyr)
+count(loan.data, 'flag_s_not_m')
+count(loan.data, 'flag_m')
+count(loan.data, 'flag_c_m')
+count(loan.data, 'flag_w')
+count(loan.data, 'flag_s')
+```
+
+## Standardize income and calculate its skewness.
+
+```{r income}
+loan.data$zscore.AMT_INCOME_TOTAL <- (AMT_INCOME_TOTAL - mean(AMT_INCOME_TOTAL))/sd(AMT_INCOME_TOTAL)
+hist(loan.data$zscore.AMT_INCOME_TOTAL, breaks=11,xlim=c(-5,5), main="histogram of Z-score",
+     xlab="Z score of AMT_INCOME_TOTAL",ylab="Counts")
+box(which = "plot", lty="solid", col="black")
+
+AMT_INCOME_TOTAL_skew <- (3*(mean(AMT_INCOME_TOTAL)-median(AMT_INCOME_TOTAL))) / sd(AMT_INCOME_TOTAL)
+AMT_INCOME_TOTAL_skew
+```
+
+#### Income is not normally distributed.
+
+***
+
+## Check for outliers in income.
+
+```{r income_outliers}
+cat("Number of lower range outliers: ", length(loan.data$zscore.AMT_INCOME_TOTAL[loan.data$zscore.AMT_INCOME_TOTAL < -3]))
+cat("Number of upper range outliers: ", length(loan.data$zscore.AMT_INCOME_TOTAL[loan.data$zscore.AMT_INCOME_TOTAL > 3]))
+```
+
+## Standardize credit and calculate its skewness.
+
+```{r credit}
+loan.data$zscore.AMT_CREDIT <- (AMT_CREDIT - mean(AMT_CREDIT))/sd(AMT_CREDIT)
+hist(loan.data$zscore.AMT_CREDIT, breaks=11,xlim=c(-5,5), main="histogram of Z-score",
+     xlab="Z score of AMT_CREDIT",ylab="Counts")
+box(which = "plot", lty="solid", col="black")
+
+AMT_CREDIT_skew <- (3*(mean(AMT_CREDIT)-median(AMT_CREDIT))) / sd(AMT_CREDIT)
+AMT_CREDIT_skew
+```
+
+#### Credit is not normally distributed.
+
+***
+
+## Check for outliers in credit.
+
+```{r credit_outliers}
+cat("Number of lower range outliers: ", length(loan.data$zscore.AMT_CREDIT[loan.data$zscore.AMT_CREDIT < -3]))
+cat("Number of upper range outliers: ", length(loan.data$zscore.AMT_CREDIT[loan.data$zscore.AMT_CREDIT > 3]))
+```
+
+## Decision for outliers and normality.
+
+#### Since there are outliers the first setp would be to remove them using something like the IQR method. Then we can check for normality again without the outliers. If the data still is not normal we can try to transform the data to reach normality using the natural log or square root transformations.
+
+***
+
+## Bin the income variable.
+
+```{r bin}
+loan.data$CAT_AMT_TOTAL_INCOME[loan.data$AMT_INCOME_TOTAL > 0 & loan.data$AMT_INCOME_TOTAL <= 100000 ] <- "A"
+loan.data$CAT_AMT_TOTAL_INCOME[loan.data$AMT_INCOME_TOTAL > 100000 & loan.data$AMT_INCOME_TOTAL <= 150000 ] <- "B"
+loan.data$CAT_AMT_TOTAL_INCOME[loan.data$AMT_INCOME_TOTAL > 150000 & loan.data$AMT_INCOME_TOTAL <= 200000 ] <- "C"
+loan.data$CAT_AMT_TOTAL_INCOME[loan.data$AMT_INCOME_TOTAL > 200000 & loan.data$AMT_INCOME_TOTAL <= 250000 ] <- "D"
+loan.data$CAT_AMT_TOTAL_INCOME[loan.data$AMT_INCOME_TOTAL > 250000 ] <- "E"
+```
+
+#### Using equal width binning when outliers are present can cause the binning distibution to be very uneven as a large outlier can cause its bin to be mostly empty, while the other ones are too full. Binning after outlier removal and/or normalization ensures that there will be a more even distribution. Using domain knowledge can also be extremly helpful for binning as you will be able to group by the data's natural clustering which ensures not only even distribution, but also that the bins represent actal patterns in the data.
+
+***
+
+## Use MICE to replace missing values.
+
+```{r mice}
+md.pattern(loan.data)
+dataframe_children <- as.data.frame(CNT_CHILDREN)
+#note maxit is low due to time for processing can be higher
+imputed_Data <- mice(loan.data, m=1, maxit = 2, method = 'cart', seed = 500)
+summary(imputed_Data)
+densityplot(imputed_Data)
+completedData <- complete(imputed_Data,1)
+sapply(completedData, function(x) sum(is.na(x)))
+```
+
+## Create a contingency table of family status and housing type.
+
+```{r table}
+table(loan.data$NAME_FAMILY_STATUS, loan.data$NAME_HOUSING_TYPE)
+```
+
+## Count the n way frequency for pairs.
+
+```{r pairs}
+count(loan.data, vars = c("NAME_FAMILY_STATUS","NAME_HOUSING_TYPE"))
+```
+
+## Are days_birth and days employed realistic?
+
+#### No, neither of them are. Days_birth is all negative numbers so at the very least you would need to take the absolute value of it before using it. Days employed also has negative numbers along with positive ones, so simply taking the absolute value of it may make the data inconsistent. It also has a commonly appearing maximum value that is more days than a human lifespan so it clearly is incorrect. In order to use both of these variables it would be very helpful to know how they were encoded initially.
+
+#### To make the days variables easier to work with we could do something like the following, which creates date objects from the columns.
+
+```{r days}
+loan.data$DOB_NEW <- as.Date(DAYS_BIRTH, origin = "1970-01-01")
+loan.data$DATE_EMPLOYED_NEW <- as.Date(DAYS_EMPLOYED, origin = "1970-01-01")
+```
+
+## Next Steps:
+
+#### To complete pre-processing we would create flag variables for the remaining categorical attributes. Normalize the numeric columns as mentioned above. Try and fix the DAYS columns if it is possible to find out how they are set up. Fix more missing data such as the blank occupation fields. We mainly learned that a lot of the data is unreliable and needs to be fixed or encoded in some way before proper conclusions can be drawn from it.
+
+#### An example of some more preprocessing we could do would be to take a subset of the columns and examine the relationships between as shown below.
+
+```{r relations}
+dataset=data.frame(TARGET,CODE_GENDER,CNT_CHILDREN,AMT_CREDIT,AMT_INCOME_TOTAL,NAME_FAMILY_STATUS)
+pairs(dataset) # graphically shows the relationship between variables
+```
